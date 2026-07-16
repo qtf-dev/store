@@ -1,0 +1,157 @@
+"""核心备份与打包逻辑"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import zipfile
+from pathlib import Path
+from typing import Iterable, List, Tuple
+
+
+def backup_project(
+    src_dir: str | os.PathLike,
+    dst_dir: str | os.PathLike,
+    extensions: Iterable[str] | None = None,
+    suffix: str = ".log",
+    skip_hidden: bool = True,
+) -> int:
+    """
+    备份单个工程：将 src_dir 下匹配扩展名的文件按原目录结构复制到 dst_dir，
+    文件名追加 suffix 后缀。
+
+    Args:
+        src_dir: 源工程目录
+        dst_dir: 目标输出目录
+        extensions: 允许的扩展名集合，None 表示全部
+        suffix: 追加后缀，默认 .log
+        skip_hidden: 是否跳过隐藏文件/目录
+
+    Returns:
+        复制的文件数量
+    """
+    src_path = Path(src_dir).resolve()
+    dst_path = Path(dst_dir).resolve()
+
+    if not src_path.is_dir():
+        raise FileNotFoundError(f"工程目录不存在: {src_path}")
+
+    ext_set = {e.lower() for e in extensions} if extensions else None
+    count = 0
+
+    for root, dirs, files in os.walk(src_path):
+        current = Path(root)
+        if skip_hidden:
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+        for filename in files:
+            if skip_hidden and filename.startswith("."):
+                continue
+
+            filepath = current / filename
+            if ext_set and filepath.suffix.lower() not in ext_set:
+                continue
+
+            rel_path = filepath.relative_to(src_path)
+            dst_file = dst_path / rel_path.with_name(rel_path.name + suffix)
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(filepath, dst_file)
+            count += 1
+
+    return count
+
+
+def pack_to_zip(source_dir: str | os.PathLike, zip_path: str | os.PathLike) -> Path:
+    """
+    将 source_dir 目录打包为 zip 压缩包。
+
+    Args:
+        source_dir: 待打包目录
+        zip_path: 输出 zip 文件路径
+
+    Returns:
+        zip 文件路径
+    """
+    src = Path(source_dir).resolve()
+    out = Path(zip_path).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(src):
+            for f in files:
+                filepath = Path(root) / f
+                arcname = filepath.relative_to(src)
+                zf.write(filepath, arcname)
+
+    return out
+
+
+def list_projects(source_root: str | os.PathLike, skip_hidden: bool = True) -> List[str]:
+    """列出源根目录下的所有一级子工程（一级子目录）"""
+    root = Path(source_root).resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"源根目录不存在: {root}")
+
+    projects = []
+    for item in root.iterdir():
+        if item.is_dir():
+            if skip_hidden and item.name.startswith("."):
+                continue
+            projects.append(item.name)
+    return sorted(projects)
+
+
+def batch_backup(
+    source_root: str | os.PathLike,
+    target_root: str | os.PathLike,
+    zip_output_root: str | os.PathLike | None = None,
+    projects: List[str] | None = None,
+    extensions: Iterable[str] | None = None,
+    suffix: str = ".log",
+    skip_hidden: bool = True,
+    do_pack: bool = False,
+) -> List[Tuple[str, int, Path | None]]:
+    """
+    批量备份多个工程。
+
+    Args:
+        source_root: 源根目录（存放所有工程的父目录）
+        target_root: 目标根目录（每个工程输出一个子目录）
+        zip_output_root: zip 包输出根目录，None 则不打包
+        projects: 指定工程名列表，None 表示全部一级子目录
+        extensions: 允许的扩展名
+        suffix: 文件后缀
+        skip_hidden: 是否跳过隐藏
+        do_pack: 是否打包 zip
+
+    Returns:
+        [(工程名, 文件数, zip路径或None), ...]
+    """
+    src_root = Path(source_root).resolve()
+    dst_root = Path(target_root).resolve()
+    zip_root = Path(zip_output_root).resolve() if zip_output_root else None
+
+    # 确定要处理的工程列表
+    if projects:
+        project_list = projects
+    else:
+        project_list = list_projects(src_root, skip_hidden)
+
+    results = []
+    for name in project_list:
+        src_dir = src_root / name
+        if not src_dir.is_dir():
+            print(f"  [跳过] {name}：目录不存在")
+            continue
+
+        dst_dir = dst_root / name
+        count = backup_project(src_dir, dst_dir, extensions, suffix, skip_hidden)
+
+        zip_path = None
+        if do_pack and zip_root and count > 0:
+            zip_path = pack_to_zip(dst_dir, zip_root / f"{name}_backup.zip")
+
+        results.append((name, count, zip_path))
+
+    return results
+
