@@ -1,0 +1,117 @@
+"""命令行入口"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from .config import load_config
+from .core import backup_project, batch_backup, pack_to_zip
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="copy-tool",
+        description="源码备份工具：按目录结构转存源码文件，支持批量和打包"
+    )
+
+    # 基础参数
+    parser.add_argument("-s", "--source", help="源根目录路径")
+    parser.add_argument("-t", "--target", help="转存目标根目录")
+    parser.add_argument("--ext", action="append", help="指定扩展名，可多次使用")
+    parser.add_argument("--suffix", help="追加后缀名，默认 .log")
+    parser.add_argument("-c", "--config", help="配置文件路径")
+    parser.add_argument("-v", "--verbose", action="store_true", help="输出详细信息")
+
+    # 打包参数
+    parser.add_argument("-z", "--zip", action="store_true", help="备份完成后打成 zip 包")
+    parser.add_argument("--zip-dir", help="zip 包输出目录")
+
+    # 工程选择
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "-p", "--project",
+        help="只处理指定工程（源目录下的某个子工程名）"
+    )
+    group.add_argument(
+        "-b", "--batch",
+        action="store_true",
+        help="批量模式：遍历源目录下所有一级子工程逐个处理"
+    )
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    cfg = load_config(args.config)
+
+    # CLI 参数覆盖
+    if args.source:
+        cfg.source_dir = Path(args.source).resolve()
+    if args.target:
+        cfg.target_dir = Path(args.target).resolve()
+    if args.zip_dir:
+        cfg.zip_output_dir = Path(args.zip_dir).resolve()
+    if args.ext:
+        cfg.extensions = {e if e.startswith(".") else f".{e}" for e in args.ext}
+    if args.suffix:
+        cfg.suffix = args.suffix if args.suffix.startswith(".") else f".{args.suffix}"
+
+    try:
+        # 模式 1：指定单个工程
+        if args.project:
+            src = cfg.source_dir / args.project
+            dst = cfg.target_dir / args.project
+            count = backup_project(src, dst, cfg.extensions, cfg.suffix, cfg.skip_hidden)
+            print(f"工程 [{args.project}]：备份 {count} 个文件")
+
+            if args.zip and count > 0:
+                zip_path = pack_to_zip(dst, cfg.zip_output_dir / f"{args.project}_backup.zip")
+                print(f"  已打包: {zip_path}")
+
+        # 模式 2：批量处理所有工程
+        elif args.batch:
+            print(f"批量模式：扫描 {cfg.source_dir} 下的工程\n")
+            results = batch_backup(
+                source_root=cfg.source_dir,
+                target_root=cfg.target_dir,
+                zip_output_root=cfg.zip_output_dir if args.zip else None,
+                extensions=cfg.extensions,
+                suffix=cfg.suffix,
+                skip_hidden=cfg.skip_hidden,
+                do_pack=args.zip,
+            )
+            print(f"\n共处理 {len(results)} 个工程：")
+            total = 0
+            for name, count, zip_path in results:
+                total += count
+                zip_info = f" -> {zip_path.name}" if zip_path else ""
+                print(f"  [{name}] {count} 个文件{zip_info}")
+            print(f"\n合计：{total} 个文件")
+
+        # 模式 3：默认 — 整个源目录当作一个工程备份
+        else:
+            count = backup_project(
+                cfg.source_dir, cfg.target_dir,
+                cfg.extensions, cfg.suffix, cfg.skip_hidden
+            )
+            print(f"完成：共备份 {count} 个文件")
+
+            if args.zip and count > 0:
+                zip_name = f"{cfg.source_dir.name}_backup.zip"
+                zip_path = pack_to_zip(cfg.target_dir, cfg.zip_output_dir / zip_name)
+                print(f"已打包: {zip_path}")
+
+    except FileNotFoundError as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,8 @@
+'''
+Author: QTF
+Date: 2026-07-15 18:32:35
+LastEditTime: 2026-07-16 10:22:27
+LastEditors: QTF
+Description: 
+'''
+__version__ = "0.1.0"

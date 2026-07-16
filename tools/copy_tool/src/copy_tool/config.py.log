@@ -1,0 +1,58 @@
+"""配置加载模块"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Set
+
+DEFAULT_EXTENSIONS: Set[str] = {
+    ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx",
+    ".py", ".java", ".go", ".rs",
+    ".js", ".ts", ".html", ".css",
+    ".md", ".txt", ".yaml", ".yml", ".json",
+}
+
+DEFAULT_SUFFIX = ".log"
+
+
+@dataclass
+class AppConfig:
+    """应用配置"""
+    source_dir: Path          # 源根目录（ws/）
+    target_dir: Path          # 转存输出根目录（zip/）
+    zip_output_dir: Path      # zip 包统一输出目录
+    extensions: Set[str] = field(default_factory=lambda: set(DEFAULT_EXTENSIONS))
+    suffix: str = DEFAULT_SUFFIX
+    skip_hidden: bool = True
+
+
+def load_config(config_path: str | None = None) -> AppConfig:
+    """从 YAML 加载配置，缺失时静默降级使用默认值"""
+    if config_path is None:
+        config_path = Path(__file__).parent.parent.parent / "config.yaml"
+    else:
+        config_path = Path(config_path)
+
+    data = {}
+    try:
+        import yaml
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (ImportError, FileNotFoundError):
+        pass
+
+    base_dir = config_path.parent
+
+    def _resolve(rel: str) -> Path:
+        p = Path(rel)
+        return p if p.is_absolute() else (base_dir / p).resolve()
+
+    return AppConfig(
+        source_dir=_resolve(data.get("source_dir", "../../ws")),
+        target_dir=_resolve(data.get("target_dir", "../../bacup")),
+        zip_output_dir=_resolve(data.get("zip_output_dir", "../../bacup/zip")),
+        extensions={e.lower() for e in data.get("extensions", DEFAULT_EXTENSIONS)},
+        suffix=str(data.get("suffix", DEFAULT_SUFFIX)),
+        skip_hidden=bool(data.get("skip_hidden", True)),
+    )

@@ -1,0 +1,75 @@
+import pytest
+from pathlib import Path
+from copy_tool.core import backup_project, pack_to_zip, list_projects, batch_backup
+
+
+@pytest.fixture
+def sample_project(tmp_path):
+    """单个工程目录"""
+    src = tmp_path / "ws" / "proj_a"
+    (src / "include").mkdir(parents=True)
+    (src / "main.c").write_text("int main() {}")
+    (src / "include" / "foo.h").write_text("#pragma once")
+    (src / "data.bin").write_bytes(b"\x00")
+    return src, tmp_path / "backup" / "proj_a"
+
+
+def test_backup_project_filter_extensions(sample_project):
+    src, dst = sample_project
+    count = backup_project(src, dst, extensions={".c", ".h"})
+    assert count == 2
+    assert (dst / "main.c.log").exists()
+    assert (dst / "include" / "foo.h.log").exists()
+    assert not (dst / "data.bin.log").exists()
+
+
+def test_backup_project_custom_suffix(sample_project):
+    src, dst = sample_project
+    backup_project(src, dst, extensions={".c"}, suffix=".bak")
+    assert (dst / "main.c.bak").exists()
+
+
+def test_pack_to_zip(sample_project):
+    src, dst = sample_project
+    backup_project(src, dst, extensions={".c", ".h"})
+    zip_path = pack_to_zip(dst, sample_project[1].parent / "zip" / "proj_a.zip")
+    assert zip_path.exists()
+    assert zip_path.suffix == ".zip"
+
+
+def test_list_projects(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / "proj_a").mkdir(parents=True)
+    (ws / "proj_b").mkdir(parents=True)
+    (ws / ".hidden").mkdir()
+    projects = list_projects(ws)
+    assert projects == ["proj_a", "proj_b"]
+
+
+def test_batch_backup(tmp_path):
+    ws = tmp_path / "ws"
+    (ws / "proj_a" / "src").mkdir(parents=True)
+    (ws / "proj_b").mkdir(parents=True)
+    (ws / "proj_a" / "main.c").write_text("a")
+    (ws / "proj_b" / "app.py").write_text("b")
+
+    results = batch_backup(
+        source_root=ws,
+        target_root=tmp_path / "backup",
+        zip_output_root=tmp_path / "backup" / "zip",
+        extensions={".c", ".py"},
+        do_pack=True,
+    )
+
+    assert len(results) == 2
+    names = [r[0] for r in results]
+    assert "proj_a" in names and "proj_b" in names
+    # 验证 zip 包生成
+    assert (tmp_path / "backup" / "zip" / "proj_a_backup.zip").exists()
+    assert (tmp_path / "backup" / "zip" / "proj_b_backup.zip").exists()
+
+
+def test_source_not_found_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        backup_project(tmp_path / "nope", tmp_path / "out")
+

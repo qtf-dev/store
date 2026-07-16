@@ -1,0 +1,29 @@
+# 源码备份工具配置
+source_dir: "../../ws"              # 源根目录（存放所有工程）
+target_dir: "../../backup"              # 转存文件输出根目录
+zip_output_dir: "../../backup/zip" # zip 包统一输出目录
+
+# 需要备份的文件扩展名
+extensions:
+  - .c
+  - .h
+  - .cpp
+  - .hpp
+  - .cc
+  - .cxx
+  - .py
+  - .java
+  - .go
+  - .rs
+  - .js
+  - .ts
+  - .html
+  - .css
+  - .md
+  - .txt
+  - .yaml
+  - .yml
+  - .json
+
+suffix: ".log"
+skip_hidden: true
